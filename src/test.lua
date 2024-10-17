@@ -6,8 +6,15 @@
 -- LICENSE file in the root directory of this source tree. An additional grant
 -- of patent rights can be found in the PATENTS file in the same directory.
 --
+if isWindows then
+    package.cpath = package.cpath .. ";build/bin/?.dll;"
+else
+    package.cpath = package.cpath .. ";build/bin/?.so;"
+end
+print("package.path=" .. package.path)
+print("package.cpath=" .. package.cpath)
 io.stdout:setvbuf('no')
-local ffi = require 'ffi'
+local ffi = require 'luaffi'
 local dlls = {}
 local HAVE_COMPLEX = false
 
@@ -26,6 +33,7 @@ if _VERSION == 'Lua 5.1' then
     end
 else
     function loadlib(lib)
+        print("loadlib:"..lib)
         return ffi.load(package.searchpath(lib, package.cpath))
     end
 end
@@ -1018,16 +1026,17 @@ assert(ffi.string(buf, 0) == '')
 assert(ffi.string(buf, ffi.new('long long', 2)) == 'aa')
 assert(ffi.string(buf, ffi.new('int', 2)) == 'aa')
 
--- Test io.tmpfile()
---ffi.cdef [[
---    int fprintf ( FILE * stream, const char * format, ... );
---]]
---local f = io.tmpfile()
---ffi.C.fprintf(f, "test: %s\n", "foo")
---
---f:seek("set", 0)
---local str = f:read('*l')
---assert(str == 'test: foo', str)
---f:close()
+if ffi.os ~= 'Windows' then
+    -- Test io.tmpfile()
+    ffi.cdef [[
+       int fprintf ( FILE * stream, const char * format, ... );
+    ]]
+    local f = io.tmpfile()
+    ffi.C.fprintf(f, "test: %s\n", "foo")
 
+    f:seek("set", 0)
+    local str = f:read('*l')
+    assert(str == 'test: foo', str)
+    f:close()
+end
 print('Test PASSED')

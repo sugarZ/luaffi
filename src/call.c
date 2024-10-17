@@ -143,12 +143,21 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
 
         lua_newtable(L);
 
+#ifdef _WIN32
 #define ADDFUNC(DLL, NAME) \
         lua_pushliteral(L, #NAME); \
-        func = DLL ? (cfunction) GetProcAddressA(DLL, #NAME) : NULL; \
+        func = DLL ? (cfunction) GetProcAddressA((HMODULE)DLL, #NAME) : NULL; \
         func = func ? func : (cfunction) &NAME; \
         lua_pushcfunction(L, (lua_CFunction) func); \
         lua_rawset(L, -3)
+#else
+#define ADDFUNC(DLL, NAME) \
+        lua_pushliteral(L, #NAME); \
+        func = DLL ? (cfunction) dlsym(DLL, #NAME) : NULL; \
+        func = func ? func : (cfunction) &NAME; \
+        lua_pushcfunction(L, (lua_CFunction) func); \
+        lua_rawset(L, -3)
+#endif
 
         ADDFUNC(NULL, check_double);
         ADDFUNC(NULL, check_float);

@@ -101,12 +101,13 @@ static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, co
 
 static void* userdata_toptr(lua_State* L, int idx)
 {
+    int isfile;
     void* ptr = lua_touserdata(L, idx);
 
     // check for FILE*
     lua_getmetatable(L, idx);
     luaL_getmetatable(L, LUA_FILEHANDLE);
-    int isfile = lua_rawequal(L, -1, -2);
+    isfile = lua_rawequal(L, -1, -2);
     lua_pop(L, 2);
 
     if (isfile) {
@@ -666,12 +667,14 @@ err:
  * and returns 1 if it exists; otherwise returns 0 and nothing is pushed */
 static int get_cfunction_address(lua_State* L, int idx, cfunction* addr)
 {
+    int top,n;
+    cfunction* f;
     if (!lua_isfunction(L, idx)) return 0;
 
-    int top = lua_gettop(L);
+    top = lua_gettop(L);
 
     // Get the last upvalue
-    int n = 2;
+    n = 2;
     while (lua_getupvalue(L, idx, n)) {
         lua_pop(L, 1);
         n++;
@@ -697,7 +700,7 @@ static int get_cfunction_address(lua_State* L, int idx, cfunction* addr)
      * callback_mt
      */
 
-    cfunction* f = lua_touserdata(L, -3);
+    f = (cfunction*)lua_touserdata(L, -3);
     *addr = f[1];
     lua_pop(L, 3);
     return 1;
@@ -1035,14 +1038,13 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const struct 
         lua_pop(L, 1);
 
     } else if (tt->is_bitfield) {
-
         uint64_t hi_mask = UINT64_C(0) - (UINT64_C(1) << (tt->bit_offset + tt->bit_size));
         uint64_t low_mask = (UINT64_C(1) << tt->bit_offset) - UINT64_C(1);
         uint64_t val = check_uint64(L, idx);
+        uint64_t data = 0;
         val &= (UINT64_C(1) << tt->bit_size) - 1;
         val <<= tt->bit_offset;
 
-        uint64_t data = 0;
         memcpy(&data, to, tt->base_size);
         data = val | (data & (hi_mask | low_mask));
         memcpy(to, &data, tt->base_size);
@@ -1188,6 +1190,7 @@ static int is_scalar(struct ctype* ct)
 static int should_pack(lua_State *L, int ct_usr, struct ctype* ct, int idx)
 {
     struct ctype argt;
+    int same =0;
     ct_usr = lua_absindex(L, ct_usr);
 
     if (IS_COMPLEX(ct->type)) {
@@ -1202,7 +1205,7 @@ static int should_pack(lua_State *L, int ct_usr, struct ctype* ct, int idx)
     case LUA_TUSERDATA:
         // don't pack if the argument is a cdata with the same type
         to_cdata(L, idx, &argt);
-        int same = is_same_type(L, ct_usr, -1, ct, &argt);
+        same = is_same_type(L, ct_usr, -1, ct, &argt);
         lua_pop(L, 1);
         return !same;
     default:
@@ -1212,7 +1215,7 @@ static int should_pack(lua_State *L, int ct_usr, struct ctype* ct, int idx)
 
 static int do_new(lua_State* L, int is_cast)
 {
-    int cargs, i;
+    int cargs, i, scalar;
     void* p;
     struct ctype ct;
     int check_ptrs = !is_cast;
@@ -1274,7 +1277,7 @@ static int do_new(lua_State* L, int is_cast)
         return 1;
     }
 
-    int scalar = is_scalar(&ct);
+    scalar = is_scalar(&ct);
     if (scalar && cargs > 1) {
         return luaL_error(L, "too many initializers");
     }
@@ -1612,9 +1615,10 @@ static ptrdiff_t lookup_cdata_index(lua_State* L, int idx, int ct_usr, struct ct
 {
     struct ctype mt;
     ptrdiff_t off;
+    int type;
 
     ct_usr = lua_absindex(L, ct_usr);
-    int type = lua_type(L, idx);
+    type = lua_type(L, idx);
 
     switch (type) {
     case LUA_TNUMBER:
@@ -2673,7 +2677,7 @@ static int ffi_string(lua_State* L)
             sz = (size_t) luaL_checknumber(L, 2);
 
         } else if (ct.is_array && !ct.is_variable_array) {
-            char* nul = memchr(data, '\0', ct.array_size);
+            char* nul = (char*)memchr(data, '\0', ct.array_size);
             sz = nul ? nul - data : ct.array_size;
 
         } else {
@@ -2784,7 +2788,11 @@ static void* find_symbol(lua_State* L, int modidx, const char* asmname)
 
     for (i = 0; i < num && sym == NULL; i++) {
         if (libs[i]) {
-            sym = GetProcAddressA(libs[i], asmname);
+#ifdef _WIN32
+            sym = GetProcAddressA((HMODULE)libs[i], asmname);
+#else
+            sym = dlsym(libs[i], asmname);
+#endif
         }
     }
 
@@ -3217,7 +3225,7 @@ static int setup_upvals(lua_State* L)
     {
 #ifdef _WIN32
         size_t sz = sizeof(HMODULE) * 6;
-        HMODULE* libs = lua_newuserdata(L, sz);
+        HMODULE* libs = (HMODULE*)lua_newuserdata(L, sz);
         memset(libs, 0, sz);
 
         /* exe */
@@ -3236,9 +3244,9 @@ static int setup_upvals(lua_State* L)
         libs[2] = LoadLibraryA("coredll.dll");
 #else
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &_fmode, &libs[2]);
-        libs[3] = LoadLibraryA("kernel32.dll");
-        libs[4] = LoadLibraryA("user32.dll");
-        libs[5] = LoadLibraryA("gdi32.dll");
+        libs[3] = (HMODULE)LoadLibraryA("kernel32.dll");
+        libs[4] = (HMODULE)LoadLibraryA("user32.dll");
+        libs[5] = (HMODULE)LoadLibraryA("gdi32.dll");
 #endif
 
         jit->lua_dll = libs[1];
@@ -3477,7 +3485,7 @@ static void setup_mt(lua_State* L, const luaL_Reg* mt, int upvals)
     luaL_setfuncs(L, mt, upvals);
 }
 
-int luaopen_ffi(lua_State* L)
+int luaopen_luaffi(lua_State* L)
 {
     lua_settop(L, 0);
 

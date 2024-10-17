@@ -110,3 +110,11 @@ using dynasm (see call_x86.dasc). The JITed code does the following in order:
 4. Retrieves errno
 5. Pushes the result back into lua from the HW register or stack
 
+windows compile cmd
+debug mode
+..\luamake\luamake --arch x86 -mode debug
+release mode
+..\luamake\luamake --arch x86
+
+linux compile cmd
+luamake rebuild
